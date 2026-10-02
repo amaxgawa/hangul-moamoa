@@ -234,6 +234,23 @@
     return { c, n };
   }
 
+  // 칸 가운데에서 채도 낮은 회색(비활성 아이템 아이콘) 픽셀 비율
+  function greyIconShare(img, x0, y0, P, Q, step) {
+    const W = img.width, d = img.data;
+    let hit = 0, n = 0;
+    for (let y = Math.round(y0 + Q * 0.3); y < y0 + Q * 0.7; y += step) {
+      for (let x = Math.round(x0 + P * 0.3); x < x0 + P * 0.7; x += step) {
+        if (x < 0 || y < 0 || x >= W || y >= img.height) continue;
+        const i = (y * W + x) * 4;
+        const r = d[i], g = d[i + 1], b = d[i + 2];
+        const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+        n++;
+        if (mx - mn <= 45 && mx >= 50) hit++;
+      }
+    }
+    return n ? hit / n : 0;
+  }
+
   function pickBase(c, n) {
     let best = -1, bc = 0;
     for (let k = 0; k <= 4; k++) if (c[k] > bc) { bc = c[k]; best = k; }
@@ -256,17 +273,26 @@
         let item = null;
         if (fr(K_PURPLE) >= 0.05) item = 'swap';
         else if (fr(K_ICON) >= 0.04 && fr(K_WHITE) >= 0.03) item = 'dot';
-        let base;
-        if (item) {
-          const ring = ringCounts(img, cx, cy, Px, Py, 0.05, 0.2, step);
-          // 아이콘 주변 빛번짐이 섞이므로 블럭색이 25% 이상이면 블럭으로 판단
-          let bk = -1, bc = 0;
-          for (let k = 1; k <= 4; k++) if (ring.c[k] > bc) { bc = ring.c[k]; bk = k; }
-          base = (ring.n && bc / ring.n >= 0.25) ? bk : 0;
-          items.push({ r, c, type: item });
-        } else {
-          base = pickBase(inner.c, inner.n);
+        let base = item ? -1 : pickBase(inner.c, inner.n);
+        if (base < 0) {
+          // 가운데가 섞인 칸(아이템 아이콘, 커서 등): 아이콘이 닿지 않는 가장자리 띠의 색으로 빈칸/블럭 판단.
+          // 아이템이 블럭 위에 겹쳐 있으면 그 칸에는 조각을 놓을 수 없으므로 블럭으로 읽어야 한다.
+          const ring = ringCounts(img, cx, cy, Px, Py, 0.05, 0.22, step);
+          const sh = [0, 1, 2, 3, 4].map((k) => (ring.n ? ring.c[k] / ring.n : 0));
+          if (item === 'dot') sh[BLUE] = Math.max(0, sh[BLUE] - 0.08); // 점 찍기 아이콘의 파란 테두리 몫
+          let best = 0;
+          for (let k = 1; k <= 4; k++) if (sh[k] > sh[best]) best = k;
+          if (item) {
+            // 활성 아이콘은 빛번짐이 가장자리까지 덮는다. 아이템은 빈칸에만 생기므로
+            // 블럭 색이 뚜렷하게 보일 때만 블럭(그 위에 조각을 놓은 경우), 아니면 빈칸.
+            base = best > 0 && sh[best] >= 0.12 ? best : 0;
+          } else {
+            base = sh[best] >= 0.5 ? best : -1;
+          }
+          // 능력이 가득 차면(7/7) 아이콘이 회색으로 바뀐다 → 지워도 능력을 못 얻는 '비활성' 아이템
+          if (!item && base >= 0 && greyIconShare(img, cx, cy, Px, Py, step) >= 0.35) item = 'inactive';
         }
+        if (item) items.push({ r, c, type: item });
         if (base < 0) unknown++;
         if (base === 0) emptyCount++;
         row.push(base);

@@ -251,7 +251,7 @@ function createSolver() {
     if (lines) {
       for (let i = 0; i < o.h; i++) if (cleared & (1 << (r + i))) out[r + i] = 0;
       for (const it of items) {
-        if (!it.got && (cleared & (1 << it.r))) { if (it.type === 'dot') gotDot++; else gotSwap++; }
+        if (!it.got && (cleared & (1 << it.r))) { if (it.type === 'dot') gotDot++; else if (it.type === 'swap') gotSwap++; }
       }
     }
     return { lines, cleared, gotDot, gotSwap };
@@ -388,7 +388,7 @@ function createSolver() {
       for (const r of clearedRows) rows[r] = 0;
       let gotDot = 0, gotSwap = 0;
       items.forEach((it, i) => {
-        if (!got.has(i) && clearedRows.includes(it.r)) { got.add(i); if (it.type === 'dot') gotDot++; else gotSwap++; }
+        if (!got.has(i) && clearedRows.includes(it.r)) { got.add(i); if (it.type === 'dot') gotDot++; else if (it.type === 'swap') gotSwap++; }
       });
       const lines = clearedRows.length;
       const gain = (m.slot >= 0 ? m.cells.length : 0) + LINE_SCORE[lines] + (gotDot + gotSwap) * ABILITY_SCORE;
@@ -450,7 +450,8 @@ function createSolver() {
     const W = STYLES[input.style] || STYLES.balanced;
     const beamWidth = input.beam || 160;
     const rows = boardToRows(input.board);
-    const items = input.items || [];   // 블럭 아래 깔린 아이템도 줄 제거 시 획득
+    // 블럭 아래 깔린 아이템도 줄 제거 시 획득. 회색(비활성) 아이템은 능력이 가득 차서 얻을 수 없으므로 제외
+    const items = (input.items || []).filter((it) => it.type === 'dot' || it.type === 'swap');
     const slots = [];
     (input.pieces || []).forEach((p, i) => {
       if (!p || !p.cells || !p.cells.length) return;

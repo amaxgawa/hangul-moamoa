@@ -158,35 +158,42 @@
     }
     if (!res.found && (crop.w !== W || crop.h !== H)) {
       // 창이 움직였을 수 있음 → 전체 프레임 재탐색
-      app.grid = null;
+      app.grid = null; app.unknownAge = null;
       return analyzeSource(src, W, H, isStill);
     }
     app.lastFrame = { canvas: app.frameCanvas, crop, res };
     if (!res.found) {
-      app.grid = null;
+      app.grid = null; app.unknownAge = null;
       setStatus(res.reason || '한글 모아모아 창을 찾지 못했습니다', 'wait');
       renderLive();
       return;
     }
     app.grid = { ...res.grid, x0: res.grid.x0 + crop.x, y0: res.grid.y0 + crop.y };
-    const obs = toObservation(res);
+    const obs = toObservation(res, isStill);
     renderLive();
     if (!obs) { setStatus('인식됨 · 화면이 가려져 대기 중', 'wait'); return; }
     acceptObservation(obs, isStill);
   }
 
-  // 인식 결과 → 관측 상태 (알 수 없는 칸은 직전 상태로 메움)
-  function toObservation(res) {
+  // 인식 결과 → 관측 상태.
+  // 알 수 없는 칸: 잠깐(커서·드래그)이면 직전 값으로 메우고, 한두 칸이 오래 안 읽히면 '막힌 칸'(6)으로 간주해
+  // 그 칸에 조각을 놓으라고 추천하지 않는다 (직전 값이 계속 이어지면서 실제 블럭을 빈칸으로 착각하는 것 방지).
+  const STUCK_FRAMES = 8;
+  function toObservation(res, isStill) {
     const prev = app.stable;
     const board = res.board.cells.map((row) => row.slice());
+    const age = app.unknownAge || (app.unknownAge = Array.from({ length: ROWS }, () => new Array(COLS).fill(0)));
     let holes = 0;
     for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
-      if (board[r][c] < 0) {
-        holes++;
-        board[r][c] = prev ? prev.board[r][c] : 0;
-      }
+      if (board[r][c] < 0) { holes++; age[r][c]++; } else age[r][c] = 0;
     }
-    if (holes > 6 || (holes > 0 && !prev)) return null;
+    if (holes > 6) return null;
+    for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+      if (board[r][c] >= 0) continue;
+      if (isStill || (age[r][c] >= STUCK_FRAMES && holes <= 2)) board[r][c] = 6;
+      else if (prev) board[r][c] = prev.board[r][c];
+      else return null;
+    }
     if (res.board.fullRows > 0) return null; // 줄 제거 애니메이션 중
     const pieces = res.pieces.map((p, i) => {
       if (p.status === 'ok') {
@@ -252,7 +259,7 @@
   function solveKeyOf(obs) {
     const ab = abilityCounts(obs);
     return obs.occKey + '|' + obs.pieces.map((p) => (p ? p.key : '-')).join(',') + '|' +
-      obs.items.map((it) => it.r + ',' + it.c + it.type).join(';') + '|' + ab.dots + ab.swaps + '|' + settings.style;
+      obs.items.filter((it) => it.type !== 'inactive').map((it) => it.r + ',' + it.c + it.type).join(';') + '|' + ab.dots + ab.swaps + '|' + settings.style;
   }
 
   function onStableState() {
@@ -331,7 +338,7 @@
     // 격자선을 칸보다 밝게: 전체 화면 공유 시 이 그림이 게임판(어두운 격자선)으로 인식되지 않게
     empty: '#4f9fca', line: '#74bce3',
     1: CSS.getPropertyValue('--c1').trim() || '#fed73b', 2: CSS.getPropertyValue('--c2').trim() || '#f483de',
-    3: CSS.getPropertyValue('--c3').trim() || '#9bd015', 4: CSS.getPropertyValue('--c4').trim() || '#5ec6fe', 5: '#b9c4d6',
+    3: CSS.getPropertyValue('--c3').trim() || '#9bd015', 4: CSS.getPropertyValue('--c4').trim() || '#5ec6fe', 5: '#b9c4d6', 6: '#5d6b80',
   };
   const STEP_COLORS = ['#ff5d8f', '#ffb000', '#00d1ff', '#ffffff', '#ffffff'];
 
@@ -362,12 +369,13 @@
       ctx.fillStyle = '#16c8ea';
       ctx.beginPath(); ctx.arc(cx, cy, s * 0.13, 0, Math.PI * 2); ctx.fill();
     } else {
-      ctx.fillStyle = '#a24bff';
+      // 바꿔 뽑기(보라) / 비활성(회색: 능력이 가득 차 얻을 수 없음)
+      ctx.fillStyle = type === 'inactive' ? 'rgba(150,160,170,.85)' : '#a24bff';
       ctx.beginPath(); ctx.arc(cx, cy, s * 0.3, 0, Math.PI * 2); ctx.fill();
       ctx.fillStyle = '#fff';
       ctx.font = `800 ${Math.round(s * 0.38)}px sans-serif`;
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText('⇄', cx, cy + 1);
+      ctx.fillText(type === 'inactive' ? '·' : '⇄', cx, cy + 1);
     }
   }
 
@@ -404,6 +412,11 @@
     for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
       const v = board[r][c];
       if (v > 0) drawBlock(ctx, pad + c * s, pad + r * s, s, COLOR[v] || COLOR[5]);
+      if (v === 6) { // 읽지 못해 막힌 칸으로 간주한 칸
+        ctx.fillStyle = '#fff'; ctx.font = `800 ${Math.round(s * 0.5)}px Pretendard, sans-serif`;
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText('?', pad + c * s + s / 2, pad + r * s + s / 2 + 1);
+      }
     }
     // 아이템 (아직 남아있는 것만)
     if (obs) {
@@ -600,6 +613,8 @@
     if (sel.risk && sel.risk.length && out.complete) {
       advice.appendChild(note('warn', `이번 턴 후 놓을 자리가 없어지는 조각: <b>${sel.risk.join(', ')}</b> — 다음에 나오면 바꿔 뽑기를 고려하세요.`));
     }
+    const stuck = app.stable ? app.stable.board.reduce((a, row) => a + row.filter((v) => v === 6).length, 0) : 0;
+    if (stuck) advice.appendChild(note('warn', `화면에서 읽지 못한 칸 ${stuck}개(배치도의 회색 ?)는 <b>막힌 칸으로 보고</b> 계산했습니다. 실제로 비어 있다면 [직접 수정]으로 고쳐주세요.`));
     const items = moves.reduce((a, m) => a + (m.gotDot || 0) + (m.gotSwap || 0), 0);
     if (items) advice.appendChild(note('good', `이 배치로 능력 아이템 ${items}개를 얻습니다 (+${items * 50}점).`));
   }
@@ -788,7 +803,7 @@
     im.onload = () => {
       stopCapture();
       app.source = 'image';
-      app.grid = null; app.candidate = null; app.stable = null; app.plan = null; app.solveKey = null;
+      app.grid = null; app.unknownAge = null; app.candidate = null; app.stable = null; app.plan = null; app.solveKey = null;
       app.lastOrientKey = [null, null, null];
       analyzeSource(im, im.naturalWidth, im.naturalHeight, true);
       if (!app.lastFrame || !app.lastFrame.res.found) {
