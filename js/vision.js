@@ -72,6 +72,44 @@
     return { V, H };
   }
 
+  // 테두리선 근거: pos 위치(±0.12칸)에 '바깥쪽(밝은 프레임)보다 어두운 청록 띠'가 보이는 비율 (0~1).
+  // 안쪽은 어두운 블럭이 붙을 수 있어 비교하지 않는다. 띠 두께는 배율에 따라 달라서 비교 거리를 칸 크기에 맞춤.
+  // outer: 바깥쪽 방향 (-1 = 왼쪽/위, +1 = 오른쪽/아래)
+  function borderFrac(img, vertical, pos, P, spanStart, spanLen, outer) {
+    const W = img.width, Hh = img.height, d = img.data;
+    const D = Math.max(2, Math.round(P * 0.2)), w = Math.max(2, Math.round(P * 0.12)), T = 16;
+    const sum = (x, y) => { const i = (y * W + x) * 4; return d[i] + d[i + 1] + d[i + 2]; };
+    const at = (u, v) => (vertical ? [u, v] : [v, u]); // u: 테두리에 수직인 축, v: 테두리를 따라가는 축
+    let hit = 0, n = 0;
+    const stepV = Math.max(1, Math.round(P / 6));
+    for (let v = Math.round(spanStart + P * 0.3); v < spanStart + spanLen - P * 0.3; v += stepV) {
+      n++;
+      for (let u = Math.round(pos - w); u <= pos + w; u++) {
+        const [x, y] = at(u, v), [xo, yo] = at(u + outer * D, v);
+        if (xo < 0 || yo < 0 || xo >= W || yo >= Hh || x < 0 || y < 0 || x >= W || y >= Hh) continue;
+        const i = (y * W + x) * 4, r = d[i], g = d[i + 1], b = d[i + 2];
+        if (b < 140 || b - r < 60 || g - r < 40) continue;
+        if (r + g + b <= sum(xo, yo) - T) { hit++; break; }
+      }
+    }
+    return n ? hit / n : 0;
+  }
+
+  // 판이 거의 꽉 차면 안쪽 격자선이 드물어 한 칸 밀린 위치로 맞춰질 수 있다.
+  // 바깥 테두리선은 블럭에 가려지지 않으므로, ±2칸 옮긴 후보 중 양쪽 테두리 근거가 뚜렷하게 더 좋은 곳으로 보정한다.
+  function alignByBorder(img, vertical, n, start, P, lo, hi, spanStart, spanLen) {
+    const bf = (s) => borderFrac(img, vertical, s, P, spanStart, spanLen, -1) + borderFrac(img, vertical, s + n * P, P, spanStart, spanLen, +1);
+    let best = start, bestBf = bf(start);
+    const base = bestBf;
+    for (const k of [-2, -1, 1, 2]) {
+      const s = start + k * P;
+      if (s < lo - 1 || s + n * P > hi + 1) continue;
+      const v = bf(s);
+      if (v > bestBf) { bestBf = v; best = s; }
+    }
+    return bestBf >= base + 0.4 ? best : start;
+  }
+
   // n칸 격자의 선 위치 s + k*P (k=0..n) 를 프로파일에 맞춘다. 내부선(k=1..n-1)으로 점수 계산.
   // 점수 상위 K개 후보(서로 위치가 다른)를 돌려준다. 가려진 부분이 있으면 1등이 틀릴 수 있어서.
   function fitLinesTop(prof, n, lo, hi, Pmin, Pmax, Pstep, K, sLo, sHi) {
@@ -195,6 +233,9 @@
       fx.start - fx.P, fx.start + fx.P);
     if (fx.score <= 0) return null;
     fx = refineLines(pr.V, COLS, fx);
+    // 4) 바깥 테두리선으로 한 칸 밀림 보정 (꽉 찬 판 대비): 열 → 행
+    fx.start = alignByBorder(img, true, COLS, fx.start, fx.P, area.x0, area.x1, fy.start, ROWS * fy.P);
+    fy.start = alignByBorder(img, false, ROWS, fy.start, fy.P, area.y0, area.y1, fx.start, COLS * fx.P);
     return {
       x0: fx.start, y0: fy.start, Px: fx.P, Py: fy.P,
       lineConf: (fx.hitRatio * (COLS - 1) + fy.hitRatio * (ROWS - 1)) / (COLS + ROWS - 2),
@@ -336,12 +377,13 @@
     const w = rx1 - rx0, h = ry1 - ry0;
     if (w <= 4 || h <= 4) return { status: 'none' };
     const mask = new Uint8Array(w * h);
-    let light = 0, cnt = 0, bx0 = w, by0 = h, bx1 = -1, by1 = -1;
+    let light = 0, cnt = 0, dark = 0, bx0 = w, by0 = h, bx1 = -1, by1 = -1;
     const colorSum = [0, 0, 0];
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
         const i = ((ry0 + y) * W + rx0 + x) * 4;
         const r = d[i], g = d[i + 1], b = d[i + 2];
+        if (r < 70 && g < 70 && b < 70) dark++;   // 카드 영역엔 원래 검은색이 없다 → 게임 마우스 커서의 외곽선
         if (isLightBg(r, g, b)) light++;
         else if (isPiecePx(r, g, b)) {
           mask[y * w + x] = 1; cnt++;
@@ -351,6 +393,8 @@
         }
       }
     }
+    // 마우스 커서가 미리보기를 가리면 모양이 깎여 다른 조각으로 읽힌다 → 이번 프레임은 판단 보류
+    if (dark >= Math.max(4, P * 0.25)) return { status: 'occluded' };
     const lightFrac = light / (w * h);
     if (lightFrac < 0.25) return { status: 'used' };         // 흰 미리보기 박스가 없음 → 사용 완료
     // 영역 경계에 닿은 덩어리(카드 테두리, 체크 표시 등)와 작은 잡음 제거

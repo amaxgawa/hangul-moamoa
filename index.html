@@ -141,7 +141,7 @@
 </head>
 <body>
 <header>
-  <h1>한글 모아모아 도우미 <small>배치 추천</small></h1>
+  <h1>한글 모아모아 도우미 <small>배치 추천 · <span class="app-version">v1.4.0</span></small></h1>
   <span id="status" class="status">대기 중</span>
   <span class="spacer"></span>
   <span class="safe-badge" title="브라우저 화면 공유(읽기 전용)만 사용합니다">게임에 입력을 보내지 않음</span>
@@ -216,6 +216,7 @@
         <li>메이플스토리를 <b>창 모드</b>로 켜고 한글 모아모아 창을 엽니다.</li>
         <li><b>화면 공유 시작</b> → 공유할 <b>창(메이플스토리)</b> 또는 <b>전체 화면</b>을 고릅니다. 디스코드 웹 화면 공유와 같은 브라우저 표준 기능이며, 영상은 이 PC 밖으로 나가지 않습니다.</li>
         <li>게임판이 인식되면 왼쪽에 <b>놓을 위치</b>, 오른쪽에 <b>순서·회전 횟수</b>가 나옵니다. 조각을 놓을 때마다 자동으로 다음 단계로 넘어갑니다.</li>
+        <li>게임 안 <b>마우스 커서를 '보유 조각' 위에 올려두지 마세요.</b> 가려지면 직전에 읽은 조각을 유지하고 위쪽 상태 표시로 알려드립니다.</li>
         <li>화면 공유가 어렵다면 <kbd>Win</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd>로 게임 창을 캡처한 뒤 이 페이지에서 <kbd>Ctrl</kbd>+<kbd>V</kbd> 해도 됩니다.</li>
       </ol>
       <p>이 도구는 화면을 <b>보기만</b> 하고 게임 프로그램에 접근하거나 키보드·마우스 입력을 보내지 않습니다. 실제 조작은 직접 하셔야 합니다.</p>
@@ -227,6 +228,8 @@
   <span>만든 사람 <b>크로아</b> 서버 <b>쇼퍼</b></span>
   <span class="dot">·</span>
   <span>기술 문의 <a href="mailto:altabc73@naver.com">altabc73@naver.com</a></span>
+  <span class="dot">·</span>
+  <span>버전 <b class="app-version">v1.4.0</b></span>
 </footer>
 
 <div class="picker" id="picker">
@@ -242,8 +245,9 @@
 <div class="drop-hint" id="dropHint">이미지를 놓으면 분석합니다</div>
 <video id="video" class="hidden" muted playsinline></video>
 
-<script src="js/vision.js"></script>
-<script src="js/solver.js"></script>
-<script src="js/app.js"></script>
+<!-- ?v= 는 업데이트 후 예전 스크립트가 브라우저 캐시에 남지 않게 하기 위함 (app.js 의 APP_VERSION 과 함께 올림) -->
+<script src="js/vision.js?v=1.4.0"></script>
+<script src="js/solver.js?v=1.4.0"></script>
+<script src="js/app.js?v=1.4.0"></script>
 </body>
 </html>

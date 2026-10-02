@@ -12,6 +12,9 @@
   const LIVE = { box: $('liveBox'), canvas: $('live'), empty: $('liveEmpty') };
 
   // ------------------------------------------------------------------ 설정 (브라우저에만 저장)
+  // 배포할 때 index.html 의 표시 버전·스크립트 ?v= 와 함께 올린다
+  const APP_VERSION = '1.4.0';
+  document.querySelectorAll('.app-version').forEach((el) => { el.textContent = 'v' + APP_VERSION; });
   const DEFAULTS = { style: 'balanced', rotateDir: 'cw', interval: 450, dots: 1, swaps: 1, beam: 200 };
   const settings = Object.assign({}, DEFAULTS, loadSettings());
   settings.style = 'balanced'; // 검증 결과 단일 전략만 사용
@@ -191,8 +194,11 @@
     app.grid = { ...res.grid, x0: res.grid.x0 + crop.x, y0: res.grid.y0 + crop.y };
     const obs = toObservation(res, isStill);
     renderLive();
-    if (!obs) { setStatus('인식됨 · 화면이 가려져 대기 중', 'wait'); return; }
+    const cursorNote = app.occludedSlots && app.occludedSlots.length
+      ? `마우스 커서가 ${app.occludedSlots.map((i) => i + 1).join('·')}번째 조각을 가리고 있어요 — 커서를 치워 주세요` : null;
+    if (!obs) { setStatus(cursorNote || '인식됨 · 화면이 가려져 대기 중', 'wait'); return; }
     acceptObservation(obs, isStill);
+    if (cursorNote) setStatus(cursorNote + ' (직전 인식 유지)', 'wait');
   }
 
   // 인식 결과 → 관측 상태.
@@ -220,15 +226,26 @@
       if (!board[r].every((v) => v > 0)) continue;
       for (let c = 0; c < COLS; c++) if (res.board.cells[r][c] < 0) board[r][c] = 0;
     }
+    const odd = app.oddStreak || (app.oddStreak = [null, null, null]);
+    const occluded = [];
     const pieces = res.pieces.map((p, i) => {
       if (p.status === 'ok') {
         const cells = S.normalize(p.cells);
         const lib = S.identify(cells);
+        if (!lib && !isStill) {
+          // 19종에 없는 모양 = 커서 등에 일부 가려졌을 가능성. 같은 모양이 계속 보일 때만 인정
+          const k = S.keyOf(cells);
+          odd[i] = odd[i] && odd[i].k === k ? { k, n: odd[i].n + 1 } : { k, n: 1 };
+          if (odd[i].n < 6) { occluded.push(i); return prev ? prev.pieces[i] : undefined; }
+        } else odd[i] = null;
         return { cells, key: S.canonicalKey(cells), okey: S.keyOf(cells), n: cells.length, name: lib ? lib.name : '?', color: p.color };
       }
+      odd[i] = null;
       if (p.status === 'used') return null;
+      if (p.status === 'occluded') occluded.push(i);  // 커서가 가림 → 직전 인식 유지
       return prev ? prev.pieces[i] : undefined; // unknown
     });
+    app.occludedSlots = occluded;
     if (pieces.some((p) => p === undefined)) return null;
     return {
       board, items: res.board.items, pieces,
@@ -993,5 +1010,5 @@
   if (!window.isSecureContext) setStatus('보안 컨텍스트가 아니라 화면 공유가 막힐 수 있습니다', 'err');
 
   // 테스트용 진입점 (개발자 도구에서 사용)
-  window.__moa = { app, S, V, analyzeSource, loadImageFile };
+  window.__moa = { app, S, V, analyzeSource, loadImageFile, version: APP_VERSION };
 })();
