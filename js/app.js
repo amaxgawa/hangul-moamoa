@@ -83,6 +83,7 @@
       app.stream = stream;
       app.source = 'capture';
       app.grid = null;
+      app.lastFoundAt = Date.now();
       const video = $('video');
       video.srcObject = stream;
       await video.play().catch(() => {});
@@ -99,6 +100,7 @@
   function stopCapture() {
     if (app.stream) app.stream.getTracks().forEach((t) => t.stop());
     app.stream = null;
+    $('video').srcObject = null;
     clearTimeout(app.timer);
     $('btnShare').textContent = '화면 공유 시작';
     $('btnShare').classList.add('primary');
@@ -108,8 +110,12 @@
     clearTimeout(app.timer);
     app.timer = setTimeout(tick, ms);
   }
+  const AUTO_STOP_MS = 5 * 60 * 1000;
+  function pipOpen() { return !!app.pip || !!document.pictureInPictureElement; }
   function tick() {
     if (!app.stream || app.editMode) return;
+    // 페이지가 안 보이고(최소화·다른 탭) 작은 창도 없으면 분석을 쉬어 CPU를 아낀다. 돌아오면 바로 다시 맞춘다.
+    if (document.hidden && !pipOpen()) { scheduleTick(2000); return; }
     const video = $('video');
     let found = false;
     if (video.readyState >= 2 && video.videoWidth) {
@@ -124,10 +130,24 @@
         $('boardCaption').textContent = '게임판을 못 찾고 있어요: 한글 모아모아 창이 열려 있는지, 다른 창에 가려지지 않았는지 확인하세요. ' +
           '화면이 검게 나오면 게임을 창 모드로 바꾸거나 [전체 화면]을 공유해 보세요.';
       }
-    } else app.missCount = 0;
+    } else { app.missCount = 0; app.lastFoundAt = Date.now(); }
+    // 공유를 끄는 걸 잊은 경우: 게임판이 오래 안 보이면 화면 공유를 스스로 끈다
+    if (!found && Date.now() - (app.lastFoundAt || Date.now()) > AUTO_STOP_MS) {
+      stopCapture();
+      setStatus('5분 동안 게임판이 보이지 않아 화면 공유를 자동으로 껐습니다', 'wait');
+      return;
+    }
     // 전체 화면 탐색은 무거우므로 못 찾는 동안은 천천히
-    scheduleTick(found ? settings.interval : Math.max(settings.interval, 1200));
+    scheduleTick(found ? settings.interval : Math.max(settings.interval, 2000));
   }
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && app.stream) scheduleTick(50); });
+  // 페이지를 닫거나 떠날 때 화면 공유·작은 창·계산 작업을 확실히 정리 (공유 중지 없이 브라우저를 닫는 경우 대비)
+  window.addEventListener('pagehide', (e) => {
+    try { stopCapture(); } catch (err) { /* 무시 */ }
+    try { if (app.pip) app.pip.close(); } catch (err) { /* 무시 */ }
+    try { stopPipVideo(); } catch (err) { /* 무시 */ }
+    try { if (!e.persisted && worker) worker.terminate(); } catch (err) { /* 무시 */ }
+  });
 
   // ------------------------------------------------------------------ 프레임 분석
   function analyzeSource(src, W, H, isStill) {
@@ -650,7 +670,8 @@
     const dpr = (cv.ownerDocument.defaultView || window).devicePixelRatio || 1;
     const shown = cv.clientWidth || 480;
     const scale = Math.max(360, Math.min(1000, shown * dpr)) / sw;
-    cv.width = Math.round(sw * scale); cv.height = Math.round(sh * scale);
+    const nw = Math.round(sw * scale), nh = Math.round(sh * scale);
+    if (cv.width !== nw || cv.height !== nh) { cv.width = nw; cv.height = nh; } // 크기 같으면 재할당하지 않음
     const ctx = cv.getContext('2d');
     ctx.drawImage(src, sx, sy, sw, sh, 0, 0, cv.width, cv.height);
     if (!locked) {
@@ -749,10 +770,19 @@
   }
 
   // ------------------------------------------------------------------ 작은 창(항상 위) 띄우기
+  // 네이버 웨일은 문서형 PIP API가 있다고 응답하지만 실제 창에는 "웹페이지를 열 수 없어요" 오류가 뜬다 → 영상형 PIP 사용
+  const IS_WHALE = /Whale\//i.test(navigator.userAgent) ||
+    !!(navigator.userAgentData && navigator.userAgentData.brands && navigator.userAgentData.brands.some((b) => /whale/i.test(b.brand)));
+  function stopPipVideo() {
+    const v = app.pipVideo;
+    if (v && v.srcObject) { v.srcObject.getTracks().forEach((t) => t.stop()); v.srcObject = null; }
+  }
   async function togglePip() {
     if (app.pip) { app.pip.close(); return; }
+    if (document.pictureInPictureElement) { await document.exitPictureInPicture().catch(() => {}); return; }
+    if (!app.lastFrame) { alert('먼저 화면 공유를 시작하거나 스크린샷을 넣어 주세요.'); return; }
     const box = LIVE.box;
-    if ('documentPictureInPicture' in window) {
+    if ('documentPictureInPicture' in window && !IS_WHALE) {
       try {
         const pip = await window.documentPictureInPicture.requestWindow({ width: 420, height: 560 });
         for (const ss of Array.from(document.styleSheets)) {
@@ -783,15 +813,25 @@
         return;
       } catch (e) { console.warn(e); }
     }
-    // 대체: 영상 PIP (글자 안내는 화면 위에 그려져 있음)
+    // 영상형 PIP: 실시간 화면 캔버스를 영상으로 띄움 (안내 글자도 캔버스에 그려져 있어 그대로 보임)
     try {
-      const v = app.pipVideo || (app.pipVideo = document.createElement('video'));
-      v.muted = true;
+      let v = app.pipVideo;
+      if (!v) {
+        v = app.pipVideo = document.createElement('video');
+        v.muted = true; v.playsInline = true;
+        v.style.cssText = 'position:fixed;left:0;bottom:0;width:2px;height:2px;opacity:0;pointer-events:none';
+        document.body.appendChild(v);
+        v.addEventListener('leavepictureinpicture', () => { stopPipVideo(); $('btnPip').textContent = '작은 창으로 띄우기'; });
+      }
       if (!v.srcObject) v.srcObject = LIVE.canvas.captureStream(8);
+      renderLive(); // 첫 프레임 공급
       await v.play();
+      if (v.readyState < 1) await new Promise((res) => { v.addEventListener('loadedmetadata', res, { once: true }); setTimeout(res, 1500); });
       await v.requestPictureInPicture();
+      $('btnPip').textContent = '작은 창 닫기';
     } catch (e) {
-      alert('이 브라우저는 작은 창 띄우기를 지원하지 않습니다. 최신 크롬/엣지를 사용해 주세요.');
+      stopPipVideo();
+      alert('이 브라우저에서는 작은 창 띄우기를 쓸 수 없습니다. 최신 크롬/엣지/웨일을 사용해 주세요.');
     }
   }
 
