@@ -282,6 +282,9 @@
           if (item === 'dot') sh[BLUE] = Math.max(0, sh[BLUE] - 0.08); // 점 찍기 아이콘의 파란 테두리 몫
           let best = 0;
           for (let k = 1; k <= 4; k++) if (sh[k] > sh[best]) best = k;
+          // 능력이 가득 차면(7/7) 아이콘이 회색으로 바뀐다(⇄·과녁 모두) → 지워도 능력을 못 얻는 '비활성' 아이템.
+          // 과녁 아이콘은 빛번짐이 가장자리까지 덮으므로 바탕 판단 전에 먼저 확인한다.
+          if (!item && greyIconShare(img, cx, cy, Px, Py, step) >= 0.6) item = 'inactive';
           if (item) {
             // 활성 아이콘은 빛번짐이 가장자리까지 덮는다. 아이템은 빈칸에만 생기므로
             // 블럭 색이 뚜렷하게 보일 때만 블럭(그 위에 조각을 놓은 경우), 아니면 빈칸.
@@ -289,8 +292,6 @@
           } else {
             base = sh[best] >= 0.5 ? best : -1;
           }
-          // 능력이 가득 차면(7/7) 아이콘이 회색으로 바뀐다 → 지워도 능력을 못 얻는 '비활성' 아이템
-          if (!item && base >= 0 && greyIconShare(img, cx, cy, Px, Py, step) >= 0.35) item = 'inactive';
         }
         if (item) items.push({ r, c, type: item });
         if (base < 0) unknown++;
@@ -298,6 +299,16 @@
         row.push(base);
       }
       cells.push(row);
+    }
+    // 판 위 능력 아이콘은 최대 3개(공식 규칙). 회색 칸이 그보다 많으면 아이콘이 아니라
+    // 드래그 중 빛나는 줄 같은 화면 효과이므로 그 칸들은 '알 수 없음'으로 되돌린다.
+    if (items.length > 3) {
+      for (const it of items) {
+        if (it.type !== 'inactive') continue;
+        if (cells[it.r][it.c] === 0) emptyCount--;
+        cells[it.r][it.c] = -1; unknown++;
+      }
+      for (let i = items.length - 1; i >= 0; i--) if (items[i].type === 'inactive') items.splice(i, 1);
     }
     // 가득 찬 줄은 존재할 수 없음(즉시 제거) → 있으면 애니메이션/드래그 중인 프레임
     let fullRows = 0;

@@ -215,6 +215,11 @@
       else return null;
     }
     if (res.board.fullRows > 0) return null; // 줄 제거 애니메이션 중
+    // 메운 결과 10칸이 다 찬 줄은 게임에 존재할 수 없다(즉시 제거됨) → 메운 칸은 사실 빈칸
+    for (let r = 0; r < ROWS; r++) {
+      if (!board[r].every((v) => v > 0)) continue;
+      for (let c = 0; c < COLS; c++) if (res.board.cells[r][c] < 0) board[r][c] = 0;
+    }
     const pieces = res.pieces.map((p, i) => {
       if (p.status === 'ok') {
         const cells = S.normalize(p.cells);

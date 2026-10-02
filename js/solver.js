@@ -383,8 +383,11 @@ function createSolver() {
         }
       }
       for (const [r, c] of m.cells) rows[r] |= 1 << c;
+      // 이 조각이 놓인 줄만 제거 대상 (본 탐색 applyMove 와 같은 기준)
       const clearedRows = [];
-      for (let r = 0; r < ROWS; r++) if (rows[r] === FULL) clearedRows.push(r);
+      const touched = new Set(m.cells.map(([r]) => r));
+      for (const r of touched) if (rows[r] === FULL) clearedRows.push(r);
+      clearedRows.sort((a, b) => a - b);
       for (const r of clearedRows) rows[r] = 0;
       let gotDot = 0, gotSwap = 0;
       items.forEach((it, i) => {
@@ -450,6 +453,8 @@ function createSolver() {
     const W = STYLES[input.style] || STYLES.balanced;
     const beamWidth = input.beam || 160;
     const rows = boardToRows(input.board);
+    // 입력에 가득 찬 줄은 있을 수 없다(인식 오류). 남겨두면 조각과 무관하게 '제거'로 계산될 수 있어 막아둔다
+    for (let r = 0; r < ROWS; r++) if (rows[r] === FULL) return { ok: false, reason: 'full-row-in-input', ms: Date.now() - t0 };
     // 블럭 아래 깔린 아이템도 줄 제거 시 획득. 회색(비활성) 아이템은 능력이 가득 차서 얻을 수 없으므로 제외
     const items = (input.items || []).filter((it) => it.type === 'dot' || it.type === 'swap');
     const slots = [];
