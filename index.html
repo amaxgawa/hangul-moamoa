@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>한글 모아모아 도우미</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+<style>
+  :root {
+    --bg: #0d1420;
+    --panel: #151f30;
+    --panel-2: #1b2840;
+    --line: #26354f;
+    --text: #e8eef8;
+    --muted: #8fa0bb;
+    --accent: #3ddc97;
+    --accent-ink: #062b1c;
+    --warn: #ffb547;
+    --danger: #ff6b6b;
+    --info: #5ec6fe;
+    --c-empty: #4f9fca;
+    --c-empty-line: #3f86ad;
+    --c1: #fed73b; --c2: #f483de; --c3: #9bd015; --c4: #5ec6fe; --c5: #b9c4d6;
+    --step1: #ff5d8f; --step2: #ffb000; --step3: #00d1ff; --stepdot: #ffffff;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); }
+  body {
+    font-family: 'Pretendard', 'Malgun Gothic', 'Apple SD Gothic Neo', system-ui, sans-serif;
+    font-size: 15px; line-height: 1.5; min-height: 100vh;
+  }
+  button, select, input { font: inherit; color: inherit; }
+  header {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    padding: 14px 20px; border-bottom: 1px solid var(--line); background: #0f1828;
+    position: sticky; top: 0; z-index: 5;
+  }
+  header h1 { font-size: 18px; margin: 0; font-weight: 800; letter-spacing: -0.3px; }
+  header h1 small { font-weight: 500; color: var(--muted); font-size: 13px; margin-left: 6px; }
+  .status { display: inline-flex; align-items: center; gap: 8px; padding: 5px 12px; border-radius: 999px;
+    background: var(--panel-2); color: var(--muted); font-size: 13px; font-weight: 600; }
+  .status::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+  .status.ok { color: var(--accent); }
+  .status.wait { color: var(--warn); }
+  .status.err { color: var(--danger); }
+  .spacer { flex: 1; }
+  .btn { border: 1px solid var(--line); background: var(--panel-2); padding: 8px 14px; border-radius: 10px;
+    cursor: pointer; font-weight: 600; white-space: nowrap; }
+  .btn:hover { border-color: #3a4d70; }
+  .btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .btn.danger { background: transparent; color: var(--danger); border-color: #5a2a33; }
+  .btn.small { padding: 4px 10px; font-size: 13px; border-radius: 8px; }
+  .btn[aria-pressed="true"] { background: #23365a; border-color: var(--info); color: var(--info); }
+
+  main { display: grid; grid-template-columns: minmax(320px, 620px) minmax(320px, 1fr); gap: 18px; padding: 18px 20px 40px; max-width: 1360px; margin: 0 auto; }
+  @media (max-width: 960px) { main { grid-template-columns: 1fr; } }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; }
+  .card h2 { font-size: 14px; margin: 0 0 12px; color: var(--muted); font-weight: 700; display: flex; align-items: center; gap: 8px; }
+  .card h2 .right { margin-left: auto; }
+  .col { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+
+  #boardWrap { position: relative; display: flex; justify-content: center; }
+  #board { width: 100%; max-width: 420px; height: auto; display: block; touch-action: manipulation; }
+  .board-caption { margin-top: 10px; color: var(--muted); font-size: 13px; text-align: center; min-height: 20px; }
+
+  .summary { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+  .stat { background: var(--panel-2); border-radius: 12px; padding: 10px 14px; min-width: 110px; flex: 1; }
+  .stat b { display: block; font-size: 22px; font-weight: 800; letter-spacing: -0.5px; font-variant-numeric: tabular-nums; }
+  .stat span { color: var(--muted); font-size: 12px; }
+
+  .steps { display: flex; flex-direction: column; gap: 10px; }
+  .step { display: grid; grid-template-columns: 34px 64px 1fr auto; gap: 12px; align-items: center;
+    background: var(--panel-2); border: 2px solid transparent; border-radius: 12px; padding: 10px 12px; cursor: pointer; }
+  .step.current { border-color: var(--accent); }
+  .step.done { opacity: .45; }
+  .step .num { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; font-weight: 800; color: #111; }
+  .step canvas { width: 64px; height: 64px; background: #0f1828; border-radius: 8px; }
+  .step .title { font-weight: 700; }
+  .step .desc { color: var(--muted); font-size: 13px; }
+  .step .gain { font-weight: 800; font-variant-numeric: tabular-nums; text-align: right; }
+  .step .gain small { display: block; font-weight: 600; color: var(--warn); font-size: 12px; }
+  .click { display: inline-flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+  .chip { font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: #233250; color: var(--info); }
+  .chip.ok { background: #143a2a; color: var(--accent); }
+  .chip.flip { background: #183a3a; color: #3fe0d0; }
+
+  .advice { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+  .note { border-radius: 10px; padding: 10px 12px; font-size: 14px; background: var(--panel-2); border-left: 4px solid var(--info); }
+  .note.warn { border-left-color: var(--warn); }
+  .note.danger { border-left-color: var(--danger); }
+  .note.good { border-left-color: var(--accent); }
+  .note .btn { margin-top: 6px; }
+
+  .slots { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .slot { background: var(--panel-2); border-radius: 12px; padding: 10px; text-align: center; position: relative; }
+  .slot canvas { width: 72px; height: 72px; }
+  .slot .label { font-weight: 700; font-size: 13px; }
+  .slot .sub { color: var(--muted); font-size: 12px; }
+  .slot.used { opacity: .45; }
+
+  #live { width: 100%; height: auto; display: block; border-radius: 10px; background: #0a0f18; }
+  .card h2 .btn.small { margin-left: 8px; font-size: 12px; color: var(--text); }
+  /* 작은 창(문서 PIP) 안에서는 실시간 화면만 꽉 차게 */
+  body.pip { min-height: 0; background: #0a0f18; overflow: hidden; }
+  body.pip #liveBox { width: 100vw; height: 100vh; display: flex; align-items: center; justify-content: center; }
+  body.pip #live { width: auto; height: auto; max-width: 100vw; max-height: 100vh; border-radius: 0; }
+  .live-empty { color: var(--muted); font-size: 13px; padding: 30px 10px; text-align: center; border: 1px dashed var(--line); border-radius: 10px; }
+
+  .settings { display: grid; grid-template-columns: auto 1fr; gap: 10px 14px; align-items: center; font-size: 14px; }
+  .settings label { color: var(--muted); }
+  .seg { display: inline-flex; background: var(--panel-2); border-radius: 10px; padding: 3px; gap: 3px; flex-wrap: wrap; }
+  .seg button { border: 0; background: transparent; padding: 5px 12px; border-radius: 8px; cursor: pointer; font-weight: 600; color: var(--muted); }
+  .seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+  .num-input { display: inline-flex; align-items: center; gap: 6px; }
+  .num-input input { width: 56px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 4px 8px; }
+
+  .help { color: var(--muted); font-size: 13px; }
+  .help ol { padding-left: 18px; margin: 6px 0; }
+  .help li { margin: 4px 0; }
+  .safe-badge { font-size: 12px; color: var(--accent); background: #10291f; border: 1px solid #1e4d3a; padding: 4px 10px; border-radius: 999px; }
+
+  .picker { position: fixed; inset: 0; background: rgba(5,10,18,.7); display: none; align-items: center; justify-content: center; z-index: 20; padding: 16px; }
+  .picker.open { display: flex; }
+  .picker .box { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 16px; max-width: 560px; width: 100%; max-height: 90vh; overflow: auto; }
+  .picker .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 8px; margin-top: 10px; }
+  .picker .grid button { background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 6px; cursor: pointer; }
+  .picker canvas { width: 64px; height: 64px; display: block; margin: 0 auto; }
+  .drop-hint { position: fixed; inset: 0; border: 3px dashed var(--accent); background: rgba(61,220,151,.08); display: none; align-items: center; justify-content: center; font-size: 22px; font-weight: 800; z-index: 30; pointer-events: none; }
+  .drop-hint.on { display: flex; }
+  .hidden { display: none !important; }
+  kbd { background: #24324d; border-radius: 5px; padding: 1px 6px; font-size: 12px; }
+  .credit { display: flex; justify-content: center; flex-wrap: wrap; gap: 6px 10px; padding: 18px 16px 28px;
+    border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; }
+  .credit b { color: var(--text); font-weight: 700; }
+  .credit a { color: var(--info); text-decoration: none; }
+  .credit a:hover { text-decoration: underline; }
+  .credit .dot { opacity: .5; }
+</style>
+</head>
+<body>
+<header>
+  <h1>한글 모아모아 도우미 <small>배치 추천</small></h1>
+  <span id="status" class="status">대기 중</span>
+  <span class="spacer"></span>
+  <span class="safe-badge" title="브라우저 화면 공유(읽기 전용)만 사용합니다">게임에 입력을 보내지 않음</span>
+  <button id="btnShare" class="btn primary">화면 공유 시작</button>
+  <button id="btnImage" class="btn">이미지로 테스트</button>
+  <button id="btnEdit" class="btn" aria-pressed="false">직접 수정</button>
+  <input id="fileInput" type="file" accept="image/*" class="hidden">
+</header>
+
+<main>
+  <section class="col">
+    <div class="card">
+      <h2>실시간 화면 · 추천 위치
+        <span class="right help" id="liveInfo"></span>
+        <button id="btnPip" class="btn small" title="게임 옆에 항상 위로 떠 있는 작은 창으로 꺼냅니다">작은 창으로 띄우기</button>
+      </h2>
+      <div id="liveBox">
+        <canvas id="live" class="hidden"></canvas>
+        <div id="liveEmpty" class="live-empty">화면 공유를 시작하거나 스크린샷을 붙여넣으세요 (<kbd>Ctrl</kbd>+<kbd>V</kbd>)</div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>추천 배치도 <span class="right" id="stepNav"></span></h2>
+      <div id="boardWrap"><canvas id="board" width="420" height="672"></canvas></div>
+      <div class="board-caption" id="boardCaption">화면 공유를 시작하거나 스크린샷을 붙여넣으세요 (<kbd>Ctrl</kbd>+<kbd>V</kbd>)</div>
+    </div>
+  </section>
+
+  <section class="col">
+    <div class="card">
+      <h2>이번 턴 추천 순서</h2>
+      <div class="summary">
+        <div class="stat"><b id="sumGain">-</b><span>예상 획득 점수</span></div>
+        <div class="stat"><b id="sumLines">-</b><span>제거할 줄</span></div>
+        <div class="stat"><b id="sumMs">-</b><span>계산 시간</span></div>
+      </div>
+      <div class="steps" id="steps"></div>
+      <div class="advice" id="advice"></div>
+    </div>
+
+    <div class="card">
+      <h2>인식된 보유 조각</h2>
+      <div class="slots" id="slots"></div>
+    </div>
+
+    <div class="card">
+      <h2>설정</h2>
+      <div class="settings">
+        <label>[회전] 버튼 방향</label>
+        <div class="seg" id="segRot">
+          <button data-v="cw">시계 방향 ↻</button>
+          <button data-v="ccw">반시계 ↺</button>
+        </div>
+        <label>보유 능력</label>
+        <div>
+          <span class="num-input">점 찍기 <input id="inDots" type="number" min="0" max="7"></span>
+          <span class="num-input" style="margin-left:10px">바꿔 뽑기 <input id="inSwaps" type="number" min="0" max="7"></span>
+          <div class="help" style="margin-top:4px">버튼이 회색(0개)인지는 자동 인식합니다. 개수는 게임 화면을 보고 맞춰주세요.</div>
+        </div>
+        <label>분석 주기</label>
+        <div class="seg" id="segInterval">
+          <button data-v="250">빠름</button>
+          <button data-v="450">보통</button>
+          <button data-v="900">느림</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card help">
+      <h2>사용 방법</h2>
+      <ol>
+        <li>메이플스토리를 <b>창 모드</b>로 켜고 한글 모아모아 창을 엽니다.</li>
+        <li><b>화면 공유 시작</b> → 공유할 <b>창(메이플스토리)</b> 또는 <b>전체 화면</b>을 고릅니다. 디스코드 웹 화면 공유와 같은 브라우저 표준 기능이며, 영상은 이 PC 밖으로 나가지 않습니다.</li>
+        <li>게임판이 인식되면 왼쪽에 <b>놓을 위치</b>, 오른쪽에 <b>순서·회전 횟수</b>가 나옵니다. 조각을 놓을 때마다 자동으로 다음 단계로 넘어갑니다.</li>
+        <li>화면 공유가 어렵다면 <kbd>Win</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd>로 게임 창을 캡처한 뒤 이 페이지에서 <kbd>Ctrl</kbd>+<kbd>V</kbd> 해도 됩니다.</li>
+      </ol>
+      <p>이 도구는 화면을 <b>보기만</b> 하고 게임 프로그램에 접근하거나 키보드·마우스 입력을 보내지 않습니다. 실제 조작은 직접 하셔야 합니다.</p>
+    </div>
+  </section>
+</main>
+
+<footer class="credit">
+  <span>만든 사람 <b>크로아</b> 서버 <b>쇼퍼</b></span>
+  <span class="dot">·</span>
+  <span>기술 문의 <a href="mailto:altabc73@naver.com">altabc73@naver.com</a></span>
+</footer>
+
+<div class="picker" id="picker">
+  <div class="box">
+    <div style="display:flex;align-items:center;gap:8px">
+      <b id="pickerTitle">조각 선택</b><span class="spacer"></span>
+      <button class="btn small" id="pickerClear">사용 완료(비우기)</button>
+      <button class="btn small" id="pickerClose">닫기</button>
+    </div>
+    <div class="grid" id="pickerGrid"></div>
+  </div>
+</div>
+<div class="drop-hint" id="dropHint">이미지를 놓으면 분석합니다</div>
+<video id="video" class="hidden" muted playsinline></video>
+
+<script src="js/vision.js"></script>
+<script src="js/solver.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
