@@ -233,6 +233,12 @@
       fx.start - fx.P, fx.start + fx.P);
     if (fx.score <= 0) return null;
     fx = refineLines(pr.V, COLS, fx);
+    // 칸은 정사각형. 꽉 찬 판은 세로 격자선이 드물어 가로 크기가 틀어지기 쉬우므로,
+    // 0.5% 넘게 다르면 근거가 더 많은 행(가로선 15개) 크기로 맞추고 가로 위치만 다시 찾는다
+    if (Math.abs(fx.P / fy.P - 1) > 0.005) {
+      const fx2 = fitLines(pr.V, COLS, area.x0, area.x1, fy.P, fy.P, 1, fx.start - fx.P * 0.5, fx.start + fx.P * 0.5);
+      if (fx2.score > 0) fx = { ...fx2, hitRatio: Math.max(fx2.hitRatio, fx.hitRatio) };
+    }
     // 4) 바깥 테두리선으로 한 칸 밀림 보정 (꽉 찬 판 대비): 열 → 행
     fx.start = alignByBorder(img, true, COLS, fx.start, fx.P, area.x0, area.x1, fy.start, ROWS * fy.P);
     fy.start = alignByBorder(img, false, ROWS, fy.start, fy.P, area.y0, area.y1, fx.start, COLS * fx.P);
@@ -518,12 +524,74 @@
     const dot = probe(LAYOUT.dotBtnY, (r, g, b) => b > 200 && r < 110 && b - r > 120);
     const swap = probe(LAYOUT.swapBtnY, (r, g, b) => b > 180 && r > 100 && g < 140 && b - g > 90);
     const seen = (p) => p.base > 0.3;
+    const visible = seen(dot) && seen(swap);
     return {
-      visible: seen(dot) && seen(swap),
+      visible,
       dot: seen(dot) && dot.white > 0.03,
       swap: seen(swap) && swap.white > 0.03,
+      dotCount: visible ? readCount(img, grid, LAYOUT.dotBtnY) : null,
+      swapCount: visible ? readCount(img, grid, LAYOUT.swapBtnY) : null,
       dotWhite: +dot.white.toFixed(3), swapWhite: +swap.white.toFixed(3),
     };
+  }
+
+  // 능력 버튼 오른쪽 원 안의 보유 개수 (크림색 6x8 픽셀 글꼴). 0~4는 실제 화면에서, 5~7은 같은 글꼴 규칙으로 만든 모양
+  const DIGITS = {
+    0: ['.####.', '##..##', '##..##', '##..##', '##..##', '##..##', '##..##', '.####.'],
+    2: ['.####.', '##..##', '##..##', '....##', '...##.', '..##..', '.##...', '######'],
+    3: ['.####.', '##..##', '....##', '.####.', '....##', '....##', '##..##', '.####.'],
+    4: ['...##.', '..###.', '.####.', '##.##.', '##.##.', '######', '...##.', '...##.'],
+    5: ['######', '##....', '##....', '#####.', '....##', '....##', '##..##', '.####.'],
+    6: ['.####.', '##..##', '##....', '#####.', '##..##', '##..##', '##..##', '.####.'],
+    7: ['######', '....##', '...##.', '...##.', '..##..', '..##..', '..##..', '..##..'],
+  };
+  function readCount(img, grid, cyRel) {
+    const P = grid.Px, Q = grid.Py, W = img.width, d = img.data;
+    const xr = grid.x0 + COLS * P, cy = grid.y0 + cyRel * Q;
+    // 배지 원 안쪽만 본다 (버튼 바탕·글자는 제외). 원 중심은 버튼 오른쪽 약 4.22칸
+    const ccx = xr + 4.22 * P, ccy = cy - 0.02 * Q, rad = 0.29 * P;
+    const x0 = Math.max(0, Math.floor(ccx - rad)), x1 = Math.min(W, Math.ceil(ccx + rad));
+    const y0 = Math.max(0, Math.floor(ccy - rad)), y1 = Math.min(img.height, Math.ceil(ccy + rad));
+    const inside = (x, y) => (x - ccx) * (x - ccx) + (y - ccy) * (y - ccy) <= rad * rad;
+    // 글자는 배지 바탕(진한 파랑/보라)보다 훨씬 밝다. 화면 공유 영상은 색이 번져 크림색이 푸르스름해지므로 밝기로 판단하고,
+    // 기준은 원 안 밝기의 중간값(바탕)과 최댓값(글자) 사이로 자동으로 정한다.
+    const lum = (x, y) => { const i = (y * W + x) * 4; return 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2]; };
+    const ls = [];
+    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) if (inside(x, y)) ls.push(lum(x, y));
+    if (ls.length < 20) return null;
+    ls.sort((a, b) => a - b);
+    const bg = ls[ls.length >> 1], top = ls[Math.floor(ls.length * 0.98)];
+    if (top - bg < 60) return null;
+    const thr = (bg + top) / 2;
+    const cream = (x, y) => inside(x, y) && lum(x, y) >= thr;
+    let bx0 = 1e9, by0 = 1e9, bx1 = -1, by1 = -1;
+    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) if (cream(x, y)) {
+      if (x < bx0) bx0 = x; if (x > bx1) bx1 = x; if (y < by0) by0 = y; if (y > by1) by1 = y;
+    }
+    if (bx1 < 0) return null;
+    const bw = bx1 - bx0 + 1, bh = by1 - by0 + 1;
+    if (bh < Q * 0.15 || bh > Q * 0.6) return null;
+    if (bw <= bh * 0.55) return 1;   // '1'은 폭이 좁다 (3x8)
+    // 글꼴 모양(6x8)을 글자 크기(bw x bh)로 면적 비율 축소해 밝기(0~1)끼리 비교 → 작은 배율에서도 버팀
+    const G = [];
+    for (let y = 0; y < bh; y++) for (let x = 0; x < bw; x++) G.push(Math.max(0, Math.min(1, (lum(bx0 + x, by0 + y) - bg) / (top - bg))));
+    let best = null, bestD = 1e9;
+    for (const [digit, rows] of Object.entries(DIGITS)) {
+      let dist = 0;
+      for (let y = 0; y < bh; y++) for (let x = 0; x < bw; x++) {
+        // 이 픽셀이 덮는 글꼴 영역 [u0,u1) x [v0,v1) 의 '#' 비율
+        const u0 = x * 6 / bw, u1 = (x + 1) * 6 / bw, v0 = y * 8 / bh, v1 = (y + 1) * 8 / bh;
+        let cov = 0;
+        for (let v = Math.floor(v0); v < v1; v++) for (let u = Math.floor(u0); u < u1; u++) {
+          if (u > 5 || v > 7 || rows[v][u] !== '#') continue;
+          cov += (Math.min(u + 1, u1) - Math.max(u, u0)) * (Math.min(v + 1, v1) - Math.max(v, v0));
+        }
+        dist += Math.abs(cov / ((u1 - u0) * (v1 - v0)) - G[y * bw + x]);
+      }
+      dist /= bw * bh;
+      if (dist < bestD) { bestD = dist; best = +digit; }
+    }
+    return bestD <= 0.3 ? best : null;
   }
 
   // ---------------------------------------------------------------------------

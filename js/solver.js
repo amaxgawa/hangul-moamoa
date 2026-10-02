@@ -477,25 +477,61 @@ function createSolver() {
       out.complete = false;
       out.plan = planOut({ st: bp.st, total: bp.value, deep: null }, slots, main.nodes, rows, items);
       const placedSlots = new Set(bp.st.moves.map((m) => m.slot));
-      out.stuckSlots = slots.filter((s, i) => !placedSlots.has(i)).map((s) => s.slot);
+      out.stuckSlots = slots.filter((_, i) => !placedSlots.has(i)).map((s) => s.slot);
     }
 
-    // 점 찍기를 쓰면 더 좋아지는지 (보너스 판단)
-    const dots = Math.min(2, input.dots | 0);
-    if (dots > 0) {
-      const withDot = search(rows, items, slots, dots, W, Math.max(60, beamWidth >> 1));
+    // 점 찍기 활용안
+    //  - 놓을 곳이 없으면: 보유한 점 찍기를 (최대 4개까지) 써서라도 남은 조각을 모두 놓는 방법을 찾는다.
+    //    다 놓을 수는 없어도 하나라도 더 놓을 수 있으면 그 방법을 낸다.
+    //  - 놓을 곳이 있으면: 점 찍기 2개 이내로 점수가 크게 오르는 경우만 보너스로 제안
+    const held = Math.max(0, input.dots | 0);
+    if (out.complete && held > 0) {
+      const withDot = search(rows, items, slots, Math.min(2, held), W, Math.max(60, beamWidth >> 1));
       const bestDot = withDot.complete.length ? finalize(withDot.complete, W, 200) : null;
       if (bestDot && bestDot.st.moves.some((m) => m.slot < 0)) {
-        const improve = bestMain ? bestDot.total - bestMain.total : Infinity;
-        if (!bestMain || improve > 400) {
+        const improve = bestDot.total - bestMain.total;
+        if (improve > 400) {
           out.dotPlan = planOut(bestDot, slots, withDot.nodes, rows, items);
           out.dotPlan.improve = improve;
+          out.dotPlan.complete = true;
         }
       }
+    } else if (!out.complete && held > 0) {
+      // 막혔을 때는 점 찍기를 아끼도록 1개부터 늘려 가며 처음으로 다 놓을 수 있는 개수를 쓴다
+      let bestPart = null;
+      for (let k = 1; k <= Math.min(4, held); k++) {
+        const withDot = search(rows, items, slots, k, W, beamWidth);
+        const bestDot = withDot.complete.length ? finalize(withDot.complete, W, 200) : null;
+        if (bestDot && bestDot.st.moves.some((m) => m.slot < 0)) {
+          out.dotPlan = planOut(bestDot, slots, withDot.nodes, rows, items);
+          out.dotPlan.improve = Infinity;
+          out.dotPlan.complete = true;
+          bestPart = null;
+          break;
+        }
+        const bp = withDot.bestPartial;
+        if (bp.placed > main.bestPartial.placed && bp.st.moves.some((m) => m.slot < 0) &&
+            (!bestPart || bp.placed > bestPart.bp.placed)) bestPart = { bp, nodes: withDot.nodes };
+      }
+      // 다 놓을 수는 없어도 점 찍기로 하나라도 더 놓을 수 있으면 그 방법
+      if (bestPart) {
+        const bp = bestPart.bp;
+        out.dotPlan = planOut({ st: bp.st, total: bp.value, deep: null }, slots, bestPart.nodes, rows, items);
+        out.dotPlan.improve = Infinity;
+        out.dotPlan.complete = false;
+        const placed = new Set(bp.st.moves.filter((m) => m.slot >= 0).map((m) => m.slot));
+        out.dotPlan.stuckSlots = slots.filter((_, i) => !placed.has(i)).map((s) => s.slot);
+      }
     }
-    // 바꿔 뽑기 조언: 놓을 수 없는 조각이 있을 때
-    if (!out.complete && (input.swaps | 0) > 0 && !out.dotPlan) {
-      out.swapAdvice = { slots: out.stuckSlots };
+    // 바꿔 뽑기: 놓을 곳이 없을 때 못 놓는 조각 중 가장 큰 것을 바꾸라고 추천.
+    // 점 찍기로 해결되면 '대안'(alt)으로만 안내한다 (점 찍기를 여러 개 쓰는 게 아까울 수 있어서).
+    // 바뀐 조각은 무작위라 미리 계산할 수 없다 → 바꾼 뒤 화면이 바뀌면 다시 계산
+    if (!out.complete && (input.swaps | 0) > 0) {
+      const dotOk = !!(out.dotPlan && out.dotPlan.complete);
+      const stuck = (!dotOk && out.dotPlan && out.dotPlan.stuckSlots) || out.stuckSlots || [];
+      const size = (slot) => { const s = slots.find((x) => x.slot === slot); return s ? s.cells.length : 0; };
+      const pick = stuck.slice().sort((a, b) => size(b) - size(a))[0];
+      if (pick != null) out.swapAdvice = { slots: stuck, slot: pick, alt: dotOk };
     }
     out.ms = Date.now() - t0;
     return out;

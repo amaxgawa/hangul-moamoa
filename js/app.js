@@ -13,7 +13,7 @@
 
   // ------------------------------------------------------------------ 설정 (브라우저에만 저장)
   // 배포할 때 index.html 의 표시 버전·스크립트 ?v= 와 함께 올린다
-  const APP_VERSION = '1.4.0';
+  const APP_VERSION = '1.5.0';
   document.querySelectorAll('.app-version').forEach((el) => { el.textContent = 'v' + APP_VERSION; });
   const DEFAULTS = { style: 'balanced', rotateDir: 'cw', interval: 450, dots: 1, swaps: 1, beam: 200 };
   const settings = Object.assign({}, DEFAULTS, loadSettings());
@@ -172,7 +172,7 @@
     let res = V.analyze(img, prev);
     if (!res.found && res.tracking && !isStill) {
       // 같은 자리에 게임판이 있는데 잠깐 가려짐(드래그 중 줄 제거 미리보기 등) → 확대·추천 표시 유지하고 대기
-      app.grid = { ...res.grid, x0: res.grid.x0 + crop.x, y0: res.grid.y0 + crop.y };
+      holdGrid(res, crop);
       app.lastFrame = { canvas: app.frameCanvas, crop, res };
       app.candidate = null; app.candidateCount = 0;
       setStatus(res.reason, 'wait');
@@ -191,7 +191,7 @@
       renderLive();
       return;
     }
-    app.grid = { ...res.grid, x0: res.grid.x0 + crop.x, y0: res.grid.y0 + crop.y };
+    holdGrid(res, crop);
     const obs = toObservation(res, isStill);
     renderLive();
     const cursorNote = app.occludedSlots && app.occludedSlots.length
@@ -199,6 +199,31 @@
     if (!obs) { setStatus(cursorNote || '인식됨 · 화면이 가려져 대기 중', 'wait'); return; }
     acceptObservation(obs, isStill);
     if (cursorNote) setStatus(cursorNote + ' (직전 인식 유지)', 'wait');
+  }
+
+  // 격자 위치를 한 번 잡으면 0.1px 단위 흔들림(칸 크기 26.0 ↔ 26.1)은 무시하고 고정한다.
+  // 그래야 실시간 화면·작은 창 크기가 들쑥날쑥하지 않다. 고정값은 최근 9번 측정의 중앙값이 뚜렷하게 다를 때만 옮기고,
+  // 창을 옮기는 등 크게 바뀌면 바로 새 위치를 쓴다.
+  function holdGrid(res, crop) {
+    const ng = { ...res.grid, x0: res.grid.x0 + crop.x, y0: res.grid.y0 + crop.y };
+    const g = app.grid;
+    const close = g && Math.abs(ng.x0 - g.x0) <= 2 && Math.abs(ng.y0 - g.y0) <= 2 &&
+      Math.abs(ng.Px / g.Px - 1) <= 0.015 && Math.abs(ng.Py / g.Py - 1) <= 0.015;
+    if (!close) { app.grid = ng; app.gridHist = [ng]; return; }
+    const h = app.gridHist || (app.gridHist = []);
+    h.push(ng);
+    if (h.length > 9) h.shift();
+    if (h.length >= 5) {
+      const med = (k) => h.map((v) => v[k]).sort((a, b) => a - b)[h.length >> 1];
+      const m = { x0: med('x0'), y0: med('y0'), Px: med('Px'), Py: med('Py') };
+      const dev = Math.abs(m.x0 - g.x0) > 0.6 || Math.abs(m.y0 - g.y0) > 0.6 ||
+        Math.abs(m.Px / g.Px - 1) > 0.008 || Math.abs(m.Py / g.Py - 1) > 0.008;
+      // 중앙값이 8번 연속 벗어날 때만 옮긴다 (값이 오락가락할 때 따라 흔들리지 않게)
+      app.gridDrift = dev ? (app.gridDrift || 0) + 1 : 0;
+      if (app.gridDrift >= 8) { app.grid = { ...g, ...m }; app.gridDrift = 0; }
+    }
+    const gg = app.grid;
+    res.grid = { ...res.grid, x0: gg.x0 - crop.x, y0: gg.y0 - crop.y, Px: gg.Px, Py: gg.Py }; // 그리기도 고정값으로
   }
 
   // 인식 결과 → 관측 상태.
@@ -267,6 +292,10 @@
       if (app.candidateCount < 2) return;   // 연속 2회 같아야 확정 (드래그 중 프레임 무시)
     }
     learnRotation(obs);
+    const a = obs.abilities;
+    if (a && a.dotCount != null && a.swapCount != null) {
+      $('abilityAuto').innerHTML = `<b>화면에서 읽음: 점 찍기 ${a.dotCount}개 · 바꿔 뽑기 ${a.swapCount}개</b> (이 값으로 계산합니다)`;
+    }
     app.stable = obs;
     setStatus('인식됨', 'ok');
     renderSlots();
@@ -289,13 +318,15 @@
   }
 
   // ------------------------------------------------------------------ 추천 계산
+  // 보유 능력 개수: 화면의 숫자 배지를 읽은 값이 우선, 못 읽으면 버튼 활성 여부 + 설정값
   function abilityCounts(obs) {
-    let dots = settings.dots, swaps = settings.swaps;
-    if (obs.abilities && obs.abilities.visible) {
-      if (!obs.abilities.dot) dots = 0; else dots = Math.max(1, dots);
-      if (!obs.abilities.swap) swaps = 0; else swaps = Math.max(1, swaps);
+    let dots = settings.dots, swaps = settings.swaps, auto = false;
+    const a = obs.abilities;
+    if (a && a.visible) {
+      if (a.dotCount != null) { dots = a.dotCount; auto = true; } else if (!a.dot) dots = 0; else dots = Math.max(1, dots);
+      if (a.swapCount != null) { swaps = a.swapCount; auto = true; } else if (!a.swap) swaps = 0; else swaps = Math.max(1, swaps);
     }
-    return { dots, swaps };
+    return { dots, swaps, auto };
   }
 
   function solveKeyOf(obs) {
@@ -313,6 +344,8 @@
       const remaining = obs.pieces.map((p) => (p ? p.key : null));
       for (let k = 0; k <= plan.boards.length - 1; k++) {
         if (plan.occ[k] !== obs.occKey) continue;
+        // 계획을 다 따랐는데 못 놓은 조각이 남았으면 '턴 완료'가 아니다 → 지금 상태로 다시 계산(점 찍기·바꿔 뽑기 안내)
+        if (k === plan.boards.length - 1 && k > 0 && obs.pieces.some(Boolean)) continue;
         const rem = plan.remaining[k];
         if (rem.every((key, i) => key === remaining[i]) && plan.style === settings.style) {
           if (plan.step !== k) { plan.step = k; app.viewStep = null; }
@@ -335,7 +368,8 @@
     const myKey = key;
     runSolve(input).then((out) => {
       if (app.solveKey !== myKey) return; // 그 사이 상태가 바뀜
-      app.plan = buildPlan(input, out, obs);
+      // 기본안으로는 다 놓을 수 없고 점 찍기로는 되면, 점 찍기 사용안을 바로 보여준다
+      app.plan = buildPlan(input, out, obs, !!(out.ok && !out.complete && out.dotPlan && out.dotPlan.complete));
       app.viewStep = null;
       setStatus(app.source === 'capture' ? '인식됨' : '분석 완료', 'ok');
       renderPlan();
@@ -630,11 +664,21 @@
         (moves.length > vs + 1 ? ' · 점선은 다음 단계' : '')
       : '';
 
-    // 조언
-    if (!out.complete && !plan.usingDot) {
-      const names = (out.stuckSlots || []).map((s) => `${s + 1}번째`).join(', ');
-      advice.appendChild(note('danger', `조각 3개를 모두 놓을 자리가 없습니다. 위 순서대로 최대한 놓고, ${names} 조각은 ` +
-        (out.swapAdvice ? '<b>바꿔 뽑기</b>로 바꾸는 것을 추천합니다.' : (out.dotPlan ? '아래 점 찍기 사용안을 보세요.' : '놓을 곳이 없어 게임이 끝날 수 있습니다.'))));
+    // 조언: 놓을 곳이 없을 때는 보유 능력 개수에 맞춰 점 찍기 / 바꿔 뽑기를 안내
+    if (!out.complete) {
+      const dp = out.dotPlan, sw = out.swapAdvice;
+      const holding = `보유: 점 찍기 ${plan.input.dots}개 · 바꿔 뽑기 ${plan.input.swaps}개`;
+      if (dp && dp.complete) {
+        advice.appendChild(note('danger', `그냥은 남은 조각을 다 놓을 자리가 없습니다. <b>점 찍기 ${dp.dotsUsed}개</b>로 줄을 지워 자리를 만들면 모두 놓을 수 있습니다 (${holding}).`));
+        if (sw) advice.appendChild(note('warn', `대안: 점 찍기를 아끼려면 <b>${pieceLabel(sw.slot)}</b>을 바꿔 뽑기하세요. 바뀐 조각은 무작위라 바꾼 뒤 다시 계산합니다.`));
+      } else if (sw) {
+        advice.appendChild(note('danger', `<b>${pieceLabel(sw.slot)}</b>을 놓을 자리가 없습니다. <b>바꿔 뽑기</b>로 바꾸세요 (${holding}).` +
+          (dp ? ` 점 찍기 ${dp.dotsUsed}개를 쓰면 다른 조각은 놓을 수 있습니다.` : '') + ' 바뀐 조각이 보이면 다시 계산합니다.'));
+      } else {
+        const names = ((dp && dp.stuckSlots) || out.stuckSlots || []).map(pieceLabel).join(', ');
+        advice.appendChild(note('danger', `<b>${names}</b>을 놓을 자리가 없고, 가진 능력으로도 해결되지 않습니다 (${holding}). ` +
+          (moves.length ? '위 순서대로 최대한 놓으세요. ' : '') + '게임이 끝날 수 있습니다.'));
+      }
     }
     if (out.dotPlan) {
       const dp = out.dotPlan;
@@ -659,6 +703,10 @@
     if (stuck) advice.appendChild(note('warn', `화면에서 읽지 못한 칸 ${stuck}개(배치도의 회색 ?)는 <b>막힌 칸으로 보고</b> 계산했습니다. 실제로 비어 있다면 [직접 수정]으로 고쳐주세요.`));
     const items = moves.reduce((a, m) => a + (m.gotDot || 0) + (m.gotSwap || 0), 0);
     if (items) advice.appendChild(note('good', `이 배치로 능력 아이템 ${items}개를 얻습니다 (+${items * 50}점).`));
+  }
+  function pieceLabel(slot) {
+    const p = app.stable && app.stable.pieces[slot];
+    return `${slot + 1}번째 조각` + (p ? `(${p.name} ${p.n}칸)` : '');
   }
   function note(kind, html) {
     const d = document.createElement('div');
@@ -752,6 +800,20 @@
       ctx.strokeStyle = col; ctx.lineWidth = Math.max(3, s * 0.14);
       roundRect(ctx, X(xr + 0.5 * g.Px), Y(cy - half * g.Py), 4.8 * s, 2 * half * sy2, s * 0.25); ctx.stroke();
       banner = { col, title: stepTitle(step, mv), sub: stepSub(mv) };
+    } else if (plan && plan.sel && !plan.out.complete && !(plan.usingDot && plan.sel.complete) &&
+               app.stable && plan.step >= moves.length && app.stable.pieces.some(Boolean)) {
+      // 놓을 자리가 없음: 바꿔 뽑기 추천이면 버튼과 바꿀 조각을 강조
+      const sw = plan.out.swapAdvice, L = V.LAYOUT, xr = g.x0 + COLS * g.Px;
+      if (sw) {
+        ctx.strokeStyle = '#a24bff'; ctx.lineWidth = Math.max(3, s * 0.14);
+        let cy = g.y0 + L.swapBtnY * g.Py;
+        roundRect(ctx, X(xr + 0.5 * g.Px), Y(cy - 0.62 * g.Py), 4.8 * s, 1.24 * sy2, s * 0.25); ctx.stroke();
+        cy = g.y0 + (L.slotY0 + sw.slot * L.slotDY) * g.Py;
+        roundRect(ctx, X(xr + 0.5 * g.Px), Y(cy - 1.38 * g.Py), 4.8 * s, 2.76 * sy2, s * 0.25); ctx.stroke();
+        banner = { col: '#a24bff', title: `바꿔 뽑기 → ${pieceLabel(sw.slot)}`, sub: '놓을 자리가 없어요 · 바뀐 조각이 보이면 다시 계산합니다' };
+      } else {
+        banner = { col: '#ff6b6b', title: '놓을 자리가 없어요', sub: '가진 능력으로도 해결되지 않습니다' };
+      }
     } else if (plan && plan.sel && app.stable && plan.step >= moves.length) {
       banner = { col: '#3ddc97', title: '이번 턴 완료', sub: '새 조각을 기다리는 중' };
     } else if (plan && plan.sel && app.viewStep != null) {

@@ -141,7 +141,7 @@
 </head>
 <body>
 <header>
-  <h1>한글 모아모아 도우미 <small>배치 추천 · <span class="app-version">v1.4.0</span></small></h1>
+  <h1>한글 모아모아 도우미 <small>배치 추천 · <span class="app-version">v1.5.0</span></small></h1>
   <span id="status" class="status">대기 중</span>
   <span class="spacer"></span>
   <span class="safe-badge" title="브라우저 화면 공유(읽기 전용)만 사용합니다">게임에 입력을 보내지 않음</span>
@@ -199,7 +199,7 @@
         <div>
           <span class="num-input">점 찍기 <input id="inDots" type="number" min="0" max="7"></span>
           <span class="num-input" style="margin-left:10px">바꿔 뽑기 <input id="inSwaps" type="number" min="0" max="7"></span>
-          <div class="help" style="margin-top:4px">버튼이 회색(0개)인지는 자동 인식합니다. 개수는 게임 화면을 보고 맞춰주세요.</div>
+          <div class="help" style="margin-top:4px" id="abilityAuto">게임 화면의 개수 숫자를 자동으로 읽습니다. 못 읽을 때만 이 값을 씁니다.</div>
         </div>
         <label>분석 주기</label>
         <div class="seg" id="segInterval">
@@ -229,7 +229,7 @@
   <span class="dot">·</span>
   <span>기술 문의 <a href="mailto:altabc73@naver.com">altabc73@naver.com</a></span>
   <span class="dot">·</span>
-  <span>버전 <b class="app-version">v1.4.0</b></span>
+  <span>버전 <b class="app-version">v1.5.0</b></span>
 </footer>
 
 <div class="picker" id="picker">
@@ -246,8 +246,8 @@
 <video id="video" class="hidden" muted playsinline></video>
 
 <!-- ?v= 는 업데이트 후 예전 스크립트가 브라우저 캐시에 남지 않게 하기 위함 (app.js 의 APP_VERSION 과 함께 올림) -->
-<script src="js/vision.js?v=1.4.0"></script>
-<script src="js/solver.js?v=1.4.0"></script>
-<script src="js/app.js?v=1.4.0"></script>
+<script src="js/vision.js?v=1.5.0"></script>
+<script src="js/solver.js?v=1.5.0"></script>
+<script src="js/app.js?v=1.5.0"></script>
 </body>
 </html>
